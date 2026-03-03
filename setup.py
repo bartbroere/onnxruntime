@@ -92,6 +92,24 @@ elif parse_arg_remove_boolean(sys.argv, "--use_qnn"):
 elif parse_arg_remove_boolean(sys.argv, "--use_webgpu"):
     package_name = "onnxruntime-webgpu"
 
+is_pyodide = parse_arg_remove_boolean(sys.argv, "--use_pyodide")
+# The Pyodide ABI tag encodes the Emscripten version, e.g. "emscripten_3_1_58".
+# It is read from the PYODIDE_ABI_VERSION environment variable (set by the build script),
+# falling back to the value embedded in the installed pyodide-build package.
+if is_pyodide:
+    _pyodide_abi_version = environ.get("PYODIDE_ABI_VERSION")
+    if _pyodide_abi_version is None:
+        try:
+            import pyodide_build  # noqa: PLC0415
+
+            _pyodide_abi_version = pyodide_build.__version__.replace(".", "_")
+            # pyodide-build's version is the Pyodide version, not the Emscripten version.
+            # The correct ABI tag comes from the xbuildenv metadata.
+            _pyodide_abi_version = environ.get("PYODIDE_ABI_VERSION", "emscripten_3_1_58")
+        except ImportError:
+            _pyodide_abi_version = "emscripten_3_1_58"
+    PYODIDE_ABI_VERSION = _pyodide_abi_version
+
 
 # PEP 513 defined manylinux1_x86_64 and manylinux1_i686
 # PEP 571 defined manylinux2010_x86_64 and manylinux2010_i686
@@ -136,7 +154,17 @@ try:
     class bdist_wheel(_bdist_wheel):  # noqa: N801
         """Helper functions to create wheel package"""
 
-        if is_openvino and is_manylinux:
+        if is_pyodide:
+
+            def get_tag(self):
+                # Produce a wheel tagged for wasm32-emscripten, e.g.:
+                #   cp312-cp312-emscripten_3_1_58_wasm32
+                python_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+                abi_tag = python_tag
+                platform_tag = f"{PYODIDE_ABI_VERSION}_wasm32"
+                return (python_tag, abi_tag, platform_tag)
+
+        elif is_openvino and is_manylinux:
 
             def get_tag(self):
                 _, _, plat = _bdist_wheel.get_tag(self)
@@ -154,7 +182,10 @@ try:
 
         def finalize_options(self):
             _bdist_wheel.finalize_options(self)
-            if not is_manylinux:
+            if not is_manylinux and not is_pyodide:
+                self.root_is_pure = False
+            elif is_pyodide:
+                # Pyodide wheels contain compiled wasm32 code, so they are not pure Python.
                 self.root_is_pure = False
 
         def _rewrite_ld_preload(self, to_preload):
@@ -361,7 +392,11 @@ elif platform.system() == "Windows":
 dl_libs = []
 libs = []
 
-if platform.system() == "Linux" or platform.system() == "AIX":
+if is_pyodide:
+    # Pyodide wheel: only the pybind11 side-module is needed.
+    # All ORT runtime code is statically linked into the .so file.
+    libs = ["onnxruntime_pybind11_state.so"]
+elif platform.system() == "Linux" or platform.system() == "AIX":
     libs = [
         "onnxruntime_pybind11_state.so",
         "libdnnl.so.2",

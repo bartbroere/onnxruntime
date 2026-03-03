@@ -70,6 +70,15 @@ option(onnxruntime_ENABLE_STATIC_ANALYSIS "Enable static analysis" OFF)
 option(onnxruntime_USE_CUSTOM_STATIC_ANALYSIS_RULES "Use a custom SDL Rule. It is mainly for our CI build" OFF)
 option(onnxruntime_REDIRECT_STATIC_ANALYSIS_OUTPUTS_TO_FILE "Use a custom SDL Rule. It is mainly for our CI build" OFF)
 option(onnxruntime_ENABLE_PYTHON "Enable python bindings" OFF)
+# Build a Python wheel for the Pyodide runtime (wasm32-emscripten).
+# When ON, the pybind11 module is compiled as an Emscripten SIDE_MODULE so
+# Pyodide's dynamic linker can load it at runtime via micropip.
+cmake_dependent_option(onnxruntime_BUILD_FOR_PYODIDE
+  "Build the Python extension as a Pyodide-compatible wasm32-emscripten SIDE_MODULE"
+  OFF
+  "onnxruntime_ENABLE_PYTHON;CMAKE_SYSTEM_NAME STREQUAL Emscripten"
+  OFF
+)
 # Enable it may cause LNK1169 error
 option(onnxruntime_ENABLE_MEMLEAK_CHECKER "Experimental: Enable memory leak checker in Windows debug build" OFF)
 option(onnxruntime_ENABLE_CONVSYMKERNELAVX2_SAT_CHECKER "Experimental: Enable ConvSymKernelAvx2 assembly saturation checker in build" OFF)

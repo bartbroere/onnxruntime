@@ -403,6 +403,20 @@ def add_webassembly_args(parser: argparse.ArgumentParser) -> None:
         default=[],
         help="Extra emscripten settings (-s <key>=<value>). Provide as <key>=<value>.",
     )
+    parser.add_argument(
+        "--build_pyodide_wheel",
+        action="store_true",
+        help="Build a Python wheel for Pyodide (wasm32-emscripten). "
+        "Compiles ONNX Runtime Python bindings with Emscripten targeting the Pyodide runtime, "
+        "producing a wheel installable via micropip. "
+        "Requires pyodide-build to be installed (pip install pyodide-build).",
+    )
+    parser.add_argument(
+        "--pyodide_version",
+        default="0.27.5",
+        help="Target Pyodide version for the wheel build (default: 0.27.5). "
+        "Determines the Emscripten version, Python ABI, and platform tag used.",
+    )
 
 
 def add_gdk_args(parser: argparse.ArgumentParser) -> None:

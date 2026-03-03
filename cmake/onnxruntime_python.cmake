@@ -125,7 +125,13 @@ if (onnxruntime_USE_NCCL)
   target_include_directories(onnxruntime_pybind11_state PRIVATE ${NCCL_INCLUDE_DIRS})
 endif()
 
-if(APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  # Pyodide/Emscripten: build as a relocatable shared object so Pyodide's dynamic linker
+  # can load it at runtime.  SIDE_MODULE=2 marks the library as a relocatable code unit
+  # whose undefined Python C API symbols are resolved by Pyodide's Python runtime.
+  # All ORT-internal symbols are statically linked in.
+  target_link_options(onnxruntime_pybind11_state PRIVATE "-sSIDE_MODULE=2")
+elseif(APPLE)
   target_link_options(onnxruntime_pybind11_state PRIVATE  "LINKER:-exported_symbols_list,${ONNXRUNTIME_ROOT}/python/exported_symbols.lst")
 elseif(UNIX)
   if (onnxruntime_ENABLE_EXTERNAL_CUSTOM_OP_SCHEMAS)

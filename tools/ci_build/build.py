@@ -517,6 +517,7 @@ def generate_build_tree(
         "-Donnxruntime_DISABLE_OPTIONAL_TYPE=" + ("ON" if disable_optional_type else "OFF"),
         "-Donnxruntime_DISABLE_STRING_TYPE=" + ("ON" if disable_string_type else "OFF"),
         "-Donnxruntime_CUDA_MINIMAL=" + ("ON" if args.enable_cuda_minimal_build else "OFF"),
+        "-Donnxruntime_BUILD_FOR_PYODIDE=" + ("ON" if args.build_pyodide_wheel else "OFF"),
     ]
     if args.minimal_build is not None:
         add_default_definition(cmake_extra_defines, "ONNX_MINIMAL_BUILD", "ON")
@@ -536,6 +537,19 @@ def generate_build_tree(
     emsdk_dir = None
     if args.build_wasm:
         emsdk_dir = os.path.join(cmake_dir, "external", "emsdk")
+        emscripten_cmake_toolchain_file = os.path.join(
+            emsdk_dir, "upstream", "emscripten", "cmake", "Modules", "Platform", "Emscripten.cmake"
+        )
+    elif args.build_pyodide_wheel:
+        # For Pyodide builds, use the emsdk bundled with pyodide-build's xbuildenv.
+        # The xbuildenv path is reported by `pyodide xbuildenv path <version>`.
+        pyodide_xbuildenv_path = (
+            subprocess.check_output(
+                [sys.executable, "-m", "pyodide", "xbuildenv", "path", args.pyodide_version],
+                text=True,
+            ).strip()
+        )
+        emsdk_dir = os.path.join(pyodide_xbuildenv_path, "emsdk")
         emscripten_cmake_toolchain_file = os.path.join(
             emsdk_dir, "upstream", "emscripten", "cmake", "Modules", "Platform", "Emscripten.cmake"
         )
@@ -1003,6 +1017,32 @@ def generate_build_tree(
 
         if emscripten_settings:
             cmake_args += [f"-Donnxruntime_EMSCRIPTEN_SETTINGS={';'.join(emscripten_settings)}"]
+
+    if args.build_pyodide_wheel:
+        cmake_args.append("-DCMAKE_TOOLCHAIN_FILE=" + emscripten_cmake_toolchain_file)
+        # Disable unit tests (no test runner for wasm32-emscripten in this build mode)
+        cmake_args += ["-Donnxruntime_BUILD_UNIT_TESTS=OFF"]
+        # Pyodide Python include dirs: located in the xbuildenv sysroot.
+        # emsdk_dir is set above to <pyodide_xbuildenv_path>/emsdk, so its parent is the xbuildenv root.
+        pyodide_sysroot = os.path.join(os.path.dirname(emsdk_dir), "xbuildenv", "pyodide-env")
+        python_include_dir = os.path.join(
+            pyodide_sysroot, "usr", "include",
+            f"python{sys.version_info.major}.{sys.version_info.minor}",
+        )
+        if os.path.isdir(python_include_dir):
+            cmake_args += [
+                f"-DPython3_INCLUDE_DIRS={python_include_dir}",
+                f"-DPython_INCLUDE_DIRS={python_include_dir}",
+            ]
+            log.info("Pyodide Python include dir: %s", python_include_dir)
+        else:
+            log.warning(
+                "Pyodide Python include dir not found at %s; CMake will attempt to locate Python headers "
+                "automatically. Build may fail if the host Python version differs from Pyodide's.",
+                python_include_dir,
+            )
+        # Signal to CMake that this is a Pyodide wheel build
+        cmake_args += ["-Donnxruntime_BUILD_FOR_PYODIDE=ON"]
 
     # Append onnxruntime-extensions cmake options
     if args.use_extensions:
@@ -2313,19 +2353,23 @@ def main():
     if args.use_tensorrt:
         args.use_cuda = True
 
-    if args.build_wheel or args.gen_doc or args.enable_training:
+    if args.build_wheel or args.gen_doc or args.enable_training or args.build_pyodide_wheel:
         args.enable_pybind = True
+
+    if args.build_pyodide_wheel:
+        args.build_wheel = True
 
     if (
         args.build_csharp
         or args.build_nuget
         or args.build_java
         or args.build_nodejs
-        or (args.enable_pybind and not args.enable_training)
+        or (args.enable_pybind and not args.enable_training and not args.build_pyodide_wheel)
     ):
         # If pyhon bindings are enabled, we embed the shared lib in the python package.
         # If training is enabled, we don't embed the shared lib in the python package since training requires
         # torch interop.
+        # For Pyodide builds, all symbols are statically linked into the pybind11 module.
         args.build_shared_lib = True
 
     if args.enable_pybind:
@@ -2538,6 +2582,20 @@ def main():
             run_subprocess([emsdk_file, "install", emsdk_version], cwd=emsdk_dir)
             log.info("Activating emsdk...")
             run_subprocess([emsdk_file, "activate", emsdk_version], cwd=emsdk_dir)
+
+        if args.build_pyodide_wheel:
+            if is_windows():
+                raise BuildError("Pyodide wheel builds are only supported on Linux and macOS")
+            # Install pyodide-build which provides the cross-build environment and compatible emsdk
+            log.info("Installing pyodide-build...")
+            run_subprocess(
+                [sys.executable, "-m", "pip", "install", f"pyodide-build=={args.pyodide_version}"],
+            )
+            # Install the Pyodide cross-build environment (includes Python headers for wasm32 and emsdk)
+            log.info("Installing Pyodide cross-build environment...")
+            run_subprocess(
+                [sys.executable, "-m", "pyodide", "xbuildenv", "install", args.pyodide_version],
+            )
 
         if not args.skip_pip_install and args.enable_pybind and is_windows():
             run_subprocess(

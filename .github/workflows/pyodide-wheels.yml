@@ -1,0 +1,146 @@
+name: Build Pyodide (wasm32-emscripten) Wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - "cmake/**"
+      - "onnxruntime/python/**"
+      - "setup.py"
+      - "tools/ci_build/build.py"
+      - "tools/ci_build/build_args.py"
+      - "tools/ci_build/github/linux/build_pyodide_wheel.sh"
+      - ".github/workflows/pyodide-wheels.yml"
+  workflow_dispatch:
+    inputs:
+      pyodide_version:
+        description: "Target Pyodide version (e.g. 0.27.5)"
+        required: false
+        default: "0.27.5"
+      build_config:
+        description: "Build configuration"
+        required: false
+        default: "Release"
+        type: choice
+        options: [Release, Debug]
+
+# Only one build per ref at a time; cancel in-progress runs for PRs.
+concurrency:
+  group: pyodide-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-pyodide-wheel:
+    name: Build Pyodide wheel (wasm32-emscripten)
+    runs-on: ubuntu-24.04
+
+    env:
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.5' }}
+      BUILD_CONFIG: ${{ github.event.inputs.build_config || 'Release' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          # Must match the Python version embedded in the target Pyodide release.
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install flatbuffers packaging wheel setuptools
+          # pyodide-build is installed by the build script, but install it
+          # here too so that the xbuildenv install can be cached.
+          python -m pip install "pyodide-build==${PYODIDE_VERSION}"
+
+      - name: Cache Pyodide cross-build environment
+        uses: actions/cache@v4
+        with:
+          path: ~/.pyodide-xbuildenv
+          key: pyodide-xbuildenv-${{ env.PYODIDE_VERSION }}
+
+      - name: Install CMake and Ninja
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
+
+      - name: Build Pyodide wheel
+        run: |
+          bash tools/ci_build/github/linux/build_pyodide_wheel.sh \
+            -v "${{ env.PYODIDE_VERSION }}" \
+            -c "${{ env.BUILD_CONFIG }}" \
+            -o "${{ github.workspace }}/dist"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-pyodide-${{ env.PYODIDE_VERSION }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Smoke-test: install the wheel in a Pyodide environment and run a simple
+  # inference to confirm the package works.
+  # ---------------------------------------------------------------------------
+  test-pyodide-wheel:
+    name: Smoke-test Pyodide wheel
+    needs: build-pyodide-wheel
+    runs-on: ubuntu-24.04
+
+    env:
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.5' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onnxruntime-pyodide-${{ env.PYODIDE_VERSION }}
+          path: dist/
+
+      - name: Install pyodide-build and Pyodide test runner
+        run: |
+          python -m pip install "pyodide-build==${PYODIDE_VERSION}" pytest
+
+      - name: Run smoke test with micropip in a Pyodide sandbox
+        run: |
+          WHEEL_FILE=$(ls dist/*.whl | head -1)
+          python tools/ci_build/github/linux/test_pyodide_wheel.py "${WHEEL_FILE}"
+
+  # ---------------------------------------------------------------------------
+  # Publish to PyPI when a release tag is pushed.
+  # ---------------------------------------------------------------------------
+  publish-pyodide-wheel:
+    name: Publish Pyodide wheel to PyPI
+    needs: test-pyodide-wheel
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: pypi-release
+    permissions:
+      id-token: write  # Required for trusted publishing
+
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onnxruntime-pyodide-${{ github.event.inputs.pyodide_version || '0.27.5' }}
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
