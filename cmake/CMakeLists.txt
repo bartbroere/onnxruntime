@@ -79,6 +79,9 @@ cmake_dependent_option(onnxruntime_BUILD_FOR_PYODIDE
   "onnxruntime_ENABLE_PYTHON;CMAKE_SYSTEM_NAME STREQUAL Emscripten"
   OFF
 )
+if(onnxruntime_BUILD_FOR_PYODIDE)
+  add_compile_definitions(ORT_BUILD_FOR_PYODIDE)
+endif()
 # Enable it may cause LNK1169 error
 option(onnxruntime_ENABLE_MEMLEAK_CHECKER "Experimental: Enable memory leak checker in Windows debug build" OFF)
 option(onnxruntime_ENABLE_CONVSYMKERNELAVX2_SAT_CHECKER "Experimental: Enable ConvSymKernelAvx2 assembly saturation checker in build" OFF)
@@ -514,13 +517,34 @@ endif()
 #Need python to generate def file
 if (onnxruntime_BUILD_SHARED_LIB OR onnxruntime_ENABLE_PYTHON)
   if (onnxruntime_ENABLE_PYTHON)
-    if (onnxruntime_REQUIRE_PYTHON_EMBED_LIB)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+      # Cross-compiling for Pyodide: find only the host interpreter.
+      # Python::Module and Python::NumPy are created as INTERFACE targets from
+      # the include dirs passed by the build script (Python_INCLUDE_DIRS and
+      # Python_NumPy_INCLUDE_DIRS cmake variables), since find_package cannot
+      # discover cross-compilation targets automatically.
+      find_package(Python 3.10 COMPONENTS Interpreter)
+      if (NOT TARGET Python::Module)
+        add_library(Python::Module INTERFACE IMPORTED)
+        if (Python_INCLUDE_DIRS)
+          set_target_properties(Python::Module PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${Python_INCLUDE_DIRS}")
+        endif()
+      endif()
+      if (NOT TARGET Python::NumPy)
+        add_library(Python::NumPy INTERFACE IMPORTED)
+        if (Python_NumPy_INCLUDE_DIRS)
+          set_target_properties(Python::NumPy PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${Python_NumPy_INCLUDE_DIRS}")
+        endif()
+      endif()
+    elseif (onnxruntime_REQUIRE_PYTHON_EMBED_LIB)
       find_package(Python 3.10 COMPONENTS Interpreter Development NumPy)
     else()
       find_package(Python 3.10 COMPONENTS Interpreter Development.Module NumPy)
     endif()
     message("Numpy version: ${Python_NumPy_VERSION}")
-    if(Python_NumPy_VERSION VERSION_LESS "2.0.0")
+    if(Python_NumPy_VERSION VERSION_LESS "2.0.0" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
       message(WARNING "The build binary will not be compatible with NumPy 2.0 because the NumPy installed on this machine is too low.")
     endif()
   else()

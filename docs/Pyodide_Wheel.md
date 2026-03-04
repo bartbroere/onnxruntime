@@ -5,7 +5,7 @@ Pyodide runs CPython in the browser via WebAssembly, allowing Python code — in
 machine learning inference — to execute client-side without a server.
 
 The Pyodide wheel is compiled with [Emscripten](https://emscripten.org/) and tagged
-`cp312-cp312-emscripten_3_1_58_wasm32` (Pyodide 0.27.x / Python 3.12). It can be
+`cp312-cp312-emscripten_3_1_58_wasm32` (Pyodide 0.27.3 / Python 3.12). It can be
 installed in a Pyodide environment with **micropip**:
 
 ```python
@@ -56,13 +56,18 @@ The Pyodide wheel is a minimal build of ONNX Runtime:
 - Linux or macOS (Windows is not supported for Pyodide builds)
 - Python 3.12 (must match the Pyodide Python version)
 - `cmake` and `ninja`
-- `pyodide-build` installed: `pip install pyodide-build==0.27.5`
+- `pyodide-build` installed: `pip install pyodide-build==0.27.3`
+- emsdk 3.1.58 installed and activated:
+  ```bash
+  git clone https://github.com/emscripten-core/emsdk && cd emsdk
+  ./emsdk install 3.1.58 && ./emsdk activate 3.1.58 && source emsdk_env.sh
+  ```
 
 ### Build
 
 ```bash
 bash tools/ci_build/github/linux/build_pyodide_wheel.sh \
-    -v 0.27.5 \
+    -v 0.27.3 \
     -c Release \
     -o ./dist
 ```
@@ -80,7 +85,7 @@ Alternatively, invoke `build.py` directly for more control:
 ```bash
 python tools/ci_build/build.py \
     --build_pyodide_wheel \
-    --pyodide_version 0.27.5 \
+    --pyodide_version 0.27.3 \
     --build_dir build_pyodide \
     --config Release \
     --skip_tests \

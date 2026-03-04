@@ -413,8 +413,8 @@ def add_webassembly_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--pyodide_version",
-        default="0.27.5",
-        help="Target Pyodide version for the wheel build (default: 0.27.5). "
+        default="0.27.3",
+        help="Target Pyodide version for the wheel build (default: 0.27.3). "
         "Determines the Emscripten version, Python ABI, and platform tag used.",
     )
 

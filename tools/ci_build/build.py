@@ -541,17 +541,29 @@ def generate_build_tree(
             emsdk_dir, "upstream", "emscripten", "cmake", "Modules", "Platform", "Emscripten.cmake"
         )
     elif args.build_pyodide_wheel:
-        # For Pyodide builds, use the emsdk bundled with pyodide-build's xbuildenv.
-        # The xbuildenv path is reported by `pyodide xbuildenv path <version>`.
-        pyodide_xbuildenv_path = (
-            subprocess.check_output(
-                [sys.executable, "-m", "pyodide", "xbuildenv", "path", args.pyodide_version],
-                text=True,
-            ).strip()
-        )
-        emsdk_dir = os.path.join(pyodide_xbuildenv_path, "emsdk")
+        # For Pyodide builds, use pyodide-build's bundled Emscripten CMake toolchain.
+        # The xbuildenv manager provides the path to the installed pyodide-root.
+        try:
+            import pyodide_build as _pyodide_build_pkg
+            from pyodide_build.build_env import xbuildenv_dirname
+            from pyodide_build.xbuildenv import CrossBuildEnvManager
+        except ImportError as e:
+            raise BuildError(
+                "pyodide-build is not installed. Run: pip install pyodide-build"
+            ) from e
+
+        _xbuildenv_dir = xbuildenv_dirname()
+        _manager = CrossBuildEnvManager(_xbuildenv_dir)
+        if _manager.current_version is None:
+            raise BuildError(
+                f"Pyodide xbuildenv is not installed. Run: pyodide xbuildenv install {args.pyodide_version}"
+            )
+        pyodide_root = _manager.pyodide_root
+        # pyodide-build ships its own Emscripten.cmake that correctly handles SIDE_MODULE builds.
+        # emcc must be in PATH (install emsdk and run `source emsdk_env.sh` before invoking this).
         emscripten_cmake_toolchain_file = os.path.join(
-            emsdk_dir, "upstream", "emscripten", "cmake", "Modules", "Platform", "Emscripten.cmake"
+            os.path.dirname(_pyodide_build_pkg.__file__),
+            "tools", "cmake", "Modules", "Platform", "Emscripten.cmake",
         )
 
     if args.use_vcpkg:
@@ -1022,25 +1034,35 @@ def generate_build_tree(
         cmake_args.append("-DCMAKE_TOOLCHAIN_FILE=" + emscripten_cmake_toolchain_file)
         # Disable unit tests (no test runner for wasm32-emscripten in this build mode)
         cmake_args += ["-Donnxruntime_BUILD_UNIT_TESTS=OFF"]
-        # Pyodide Python include dirs: located in the xbuildenv sysroot.
-        # emsdk_dir is set above to <pyodide_xbuildenv_path>/emsdk, so its parent is the xbuildenv root.
-        pyodide_sysroot = os.path.join(os.path.dirname(emsdk_dir), "xbuildenv", "pyodide-env")
-        python_include_dir = os.path.join(
-            pyodide_sysroot, "usr", "include",
-            f"python{sys.version_info.major}.{sys.version_info.minor}",
-        )
-        if os.path.isdir(python_include_dir):
-            cmake_args += [
-                f"-DPython3_INCLUDE_DIRS={python_include_dir}",
-                f"-DPython_INCLUDE_DIRS={python_include_dir}",
-            ]
+        # Python include dirs: read from pyodide-build's environment variables.
+        # pyodide_root is set above via CrossBuildEnvManager.
+        try:
+            from pyodide_build.build_env import get_build_environment_vars
+            import os as _os
+            _os.environ.setdefault("PYODIDE_ROOT", str(pyodide_root))
+            _build_vars = get_build_environment_vars(pyodide_root)
+            python_include_dir = _build_vars.get("PYTHONINCLUDE", "")
+        except Exception:
+            python_include_dir = ""
+        if python_include_dir and os.path.isdir(python_include_dir):
+            # CMakeLists.txt uses `find_package(Python ...)` (not Python3), so set Python_INCLUDE_DIRS.
+            cmake_args += [f"-DPython_INCLUDE_DIRS={python_include_dir}"]
             log.info("Pyodide Python include dir: %s", python_include_dir)
         else:
             log.warning(
                 "Pyodide Python include dir not found at %s; CMake will attempt to locate Python headers "
-                "automatically. Build may fail if the host Python version differs from Pyodide's.",
+                "automatically.",
                 python_include_dir,
             )
+        # NumPy include dir: use the host numpy (headers are ABI-compatible for cross-compilation).
+        # The actual numpy .so is resolved at runtime by Pyodide's numpy package.
+        try:
+            import numpy as _numpy
+            numpy_include_dir = _numpy.get_include()
+            cmake_args += [f"-DPython_NumPy_INCLUDE_DIRS={numpy_include_dir}"]
+            log.info("NumPy include dir: %s", numpy_include_dir)
+        except ImportError:
+            log.warning("NumPy not installed on host; NumPy headers will not be available for Pyodide build.")
         # Signal to CMake that this is a Pyodide wheel build
         cmake_args += ["-Donnxruntime_BUILD_FOR_PYODIDE=ON"]
 
@@ -1992,11 +2014,31 @@ def build_python_wheel(
     default_training_package_device=False,
     use_ninja=False,
     enable_training_apis=False,
+    use_pyodide=False,
 ):
     for config in configs:
         cwd = get_config_build_dir(build_dir, config)
         if is_windows() and not use_ninja:
             cwd = os.path.join(cwd, config)
+
+        if use_pyodide:
+            import re as _re
+            import subprocess as _subprocess
+
+            # Determine the Pyodide ABI tag from the active emcc version.
+            # CMake already populated cwd/onnxruntime/capi/ with the built .so.
+            try:
+                emcc_out = _subprocess.check_output(["emcc", "--version"], stderr=_subprocess.STDOUT).decode()
+                m = _re.search(r"(\d+\.\d+\.\d+)", emcc_out)
+                emcc_ver = m.group(1) if m else "3.1.58"
+            except Exception:
+                emcc_ver = "3.1.58"
+            pyodide_abi_version = "emscripten_" + emcc_ver.replace(".", "_")
+            log.info("PYODIDE_ABI_VERSION: %s", pyodide_abi_version)
+
+            wheel_args = [sys.executable, os.path.join(source_dir, "setup.py"), "bdist_wheel", "--use_pyodide"]
+            run_subprocess(wheel_args, cwd=cwd, env={"PYODIDE_ABI_VERSION": pyodide_abi_version})
+            continue
 
         args = [sys.executable, os.path.join(source_dir, "setup.py"), "bdist_wheel"]
 
@@ -2586,16 +2628,17 @@ def main():
         if args.build_pyodide_wheel:
             if is_windows():
                 raise BuildError("Pyodide wheel builds are only supported on Linux and macOS")
-            # Install pyodide-build which provides the cross-build environment and compatible emsdk
+            # Install pyodide-build which provides the Emscripten CMake toolchain and xbuildenv manager.
+            # Note: emcc must already be in PATH (install emsdk separately and run source emsdk_env.sh).
             log.info("Installing pyodide-build...")
             run_subprocess(
                 [sys.executable, "-m", "pip", "install", f"pyodide-build=={args.pyodide_version}"],
             )
-            # Install the Pyodide cross-build environment (includes Python headers for wasm32 and emsdk)
+            # Install the Pyodide cross-build environment (Python headers for wasm32, sysconfig data, etc.)
             log.info("Installing Pyodide cross-build environment...")
-            run_subprocess(
-                [sys.executable, "-m", "pyodide", "xbuildenv", "install", args.pyodide_version],
-            )
+            # Use the `pyodide` CLI entry point installed alongside pyodide-build.
+            pyodide_cli = str(Path(sys.executable).parent / "pyodide")
+            run_subprocess([pyodide_cli, "xbuildenv", "install", args.pyodide_version])
 
         if not args.skip_pip_install and args.enable_pybind and is_windows():
             run_subprocess(
@@ -2688,6 +2731,7 @@ def main():
                 default_training_package_device=default_training_package_device,
                 use_ninja=(args.cmake_generator == "Ninja"),
                 enable_training_apis=args.enable_training_apis,
+                use_pyodide=args.build_pyodide_wheel,
             )
 
         if args.build_nuget:

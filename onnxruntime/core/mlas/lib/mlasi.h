@@ -2858,11 +2858,18 @@ MlasReadTimeStampCounter(void)
 
 
 constexpr size_t ThreadedBufAlignment = 64;
-extern thread_local size_t ThreadedBufSize;
-#ifdef _MSC_VER
-extern thread_local std::unique_ptr<uint8_t, decltype(&_aligned_free)> ThreadedBufHolder;
+// Pyodide runs single-threaded; thread_local TLS init exports are incompatible with
+// Pyodide's dynamic linker, so disable thread_local for that build.
+#ifdef ORT_BUILD_FOR_PYODIDE
+#define MLAS_THREAD_LOCAL
 #else
-extern thread_local std::unique_ptr<uint8_t, decltype(&free)> ThreadedBufHolder;
+#define MLAS_THREAD_LOCAL thread_local
+#endif
+extern MLAS_THREAD_LOCAL size_t ThreadedBufSize;
+#ifdef _MSC_VER
+extern MLAS_THREAD_LOCAL std::unique_ptr<uint8_t, decltype(&_aligned_free)> ThreadedBufHolder;
+#else
+extern MLAS_THREAD_LOCAL std::unique_ptr<uint8_t, decltype(&free)> ThreadedBufHolder;
 #endif
 
 MLAS_FORCEINLINE

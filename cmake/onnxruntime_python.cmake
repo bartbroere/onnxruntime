@@ -130,7 +130,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   # can load it at runtime.  SIDE_MODULE=2 marks the library as a relocatable code unit
   # whose undefined Python C API symbols are resolved by Pyodide's Python runtime.
   # All ORT-internal symbols are statically linked in.
-  target_link_options(onnxruntime_pybind11_state PRIVATE "-sSIDE_MODULE=2")
+  # Build as a Pyodide-compatible dynamic shared library.
+  # SIDE_MODULE=2 enables LTO-based deduplication of static library symbols at link time.
+  # WASM_BIGINT is required so that i64 function signatures (e.g. PyLong_AsLongLong)
+  # match the Pyodide runtime's ABI.  The ORT_BUILD_FOR_PYODIDE compile definition removes
+  # EM_ASM code (external data loader) that uses Module.MountedFiles — a WASM-specific API
+  # that is not available in Pyodide. Without this, Pyodide's WASM loader fails to parse
+  # the EM_ASM sections embedded in SIDE_MODULE=2 binaries.
+  # EXPORTED_FUNCTIONS prevents LTO dead-code elimination from removing PyInit_*.
+  target_link_options(onnxruntime_pybind11_state PRIVATE
+    "-sSIDE_MODULE=2"
+    "-sWASM_BIGINT"
+    "-sEXPORTED_FUNCTIONS=[\"_PyInit_onnxruntime_pybind11_state\"]"
+  )
 elseif(APPLE)
   target_link_options(onnxruntime_pybind11_state PRIVATE  "LINKER:-exported_symbols_list,${ONNXRUNTIME_ROOT}/python/exported_symbols.lst")
 elseif(UNIX)

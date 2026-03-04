@@ -27,6 +27,19 @@ common::Status LoadWebAssemblyExternalData(const Env& env,
                                            SafeInt<size_t> data_length,
                                            ExternalDataLoadType load_type,
                                            void* tensor_data) {
+#if defined(ORT_BUILD_FOR_PYODIDE)
+  // In Pyodide, Module.MountedFiles is not available.
+  // External data files are accessed via Pyodide's virtual filesystem (MEMFS) through
+  // standard POSIX calls, so we return "not available" immediately to let the caller
+  // fall back to regular file I/O.
+  ORT_UNUSED_PARAMETER(env);
+  ORT_UNUSED_PARAMETER(data_file_path);
+  ORT_UNUSED_PARAMETER(data_offset);
+  ORT_UNUSED_PARAMETER(data_length);
+  ORT_UNUSED_PARAMETER(load_type);
+  ORT_UNUSED_PARAMETER(tensor_data);
+  return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Module.MountedFiles is not available.");
+#else
   auto err_code = EM_ASM_INT(({
                                // If available, "Module.MountedFiles" is a Map for all preloaded files.
                                if (typeof Module == 'undefined' || !Module.MountedFiles) {
@@ -98,8 +111,9 @@ common::Status LoadWebAssemblyExternalData(const Env& env,
   }
   return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Failed to load external data file \"", data_file_path,
                          "\", error: ", err_msg);
+#endif  // ORT_BUILD_FOR_PYODIDE
 }
 
-#endif
+#endif  // __wasm__
 
 }  // namespace onnxruntime

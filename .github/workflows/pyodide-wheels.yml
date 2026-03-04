@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       pyodide_version:
-        description: "Target Pyodide version (e.g. 0.27.5)"
+        description: "Target Pyodide version (e.g. 0.27.3)"
         required: false
-        default: "0.27.5"
+        default: "0.27.3"
       build_config:
         description: "Build configuration"
         required: false
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.5' }}
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.3' }}
       BUILD_CONFIG: ${{ github.event.inputs.build_config || 'Release' }}
 
     steps:
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.5' }}
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.3' }}
 
     steps:
       - name: Checkout repository
@@ -114,12 +114,21 @@ jobs:
 
       - name: Install pyodide-build and Pyodide test runner
         run: |
-          python -m pip install "pyodide-build==${PYODIDE_VERSION}" pytest
+          python -m pip install "pyodide-build==${PYODIDE_VERSION}" pytest pytest-pyodide
+
+      - name: Set up Pyodide cross-build environment
+        run: |
+          pyodide xbuildenv install "${PYODIDE_VERSION}"
 
       - name: Run smoke test with micropip in a Pyodide sandbox
         run: |
           WHEEL_FILE=$(ls dist/*.whl | head -1)
-          python tools/ci_build/github/linux/test_pyodide_wheel.py "${WHEEL_FILE}"
+          DIST_DIR="${HOME}/.pyodide-xbuildenv/${PYODIDE_VERSION}/xbuildenv/pyodide-root/dist"
+          export ORT_PYODIDE_WHEEL="${WHEEL_FILE}"
+          pytest tools/ci_build/github/linux/test_pyodide_wheel.py \
+            --rt=node \
+            --dist-dir "${DIST_DIR}" \
+            -v
 
   # ---------------------------------------------------------------------------
   # Publish to PyPI when a release tag is pushed.
@@ -137,7 +146,7 @@ jobs:
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
-          name: onnxruntime-pyodide-${{ github.event.inputs.pyodide_version || '0.27.5' }}
+          name: onnxruntime-pyodide-${{ github.event.inputs.pyodide_version || '0.27.3' }}
           path: dist/
 
       - name: Publish to PyPI

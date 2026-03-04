@@ -9,8 +9,11 @@
 #   await micropip.install("onnxruntime-<version>-cp312-cp312-emscripten_3_1_58_wasm32.whl")
 #
 # Prerequisites:
+#   - Python 3.12 (must match the Python version embedded in the target Pyodide release)
 #   - pyodide-build is installed (pip install pyodide-build)
-#   - The ONNX Runtime source tree is available
+#   - emsdk is installed and activated (emcc must be in PATH):
+#       git clone https://github.com/emscripten-core/emsdk && cd emsdk
+#       ./emsdk install 3.1.58 && ./emsdk activate 3.1.58 && source emsdk_env.sh
 #   - cmake and ninja are on PATH
 #
 # Usage:
@@ -18,7 +21,7 @@
 
 set -e -x
 
-PYODIDE_VERSION="0.27.5"
+PYODIDE_VERSION="0.27.3"
 BUILD_CONFIG="Release"
 OUTPUT_DIR="/build/dist"
 
@@ -37,62 +40,26 @@ ORT_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 mkdir -p "${OUTPUT_DIR}"
 
 # ---------------------------------------------------------------------------
-# Step 1: Install pyodide-build and the cross-build environment
+# Step 1: Verify emcc is available
 # ---------------------------------------------------------------------------
-python3 -m pip install "pyodide-build==${PYODIDE_VERSION}"
-
-echo "Installing Pyodide ${PYODIDE_VERSION} cross-build environment..."
-python3 -m pyodide xbuildenv install "${PYODIDE_VERSION}"
-
-# Obtain the path to the installed xbuildenv.  The directory layout is:
-#   <xbuildenv_root>/
-#     emsdk/              <- Emscripten SDK (with the version Pyodide was built with)
-#     xbuildenv/
-#       pyodide-env/
-#         usr/include/python3.x/   <- Python headers for wasm32
-XBUILDENV_ROOT="$(python3 -m pyodide xbuildenv path "${PYODIDE_VERSION}")"
-echo "Pyodide xbuildenv root: ${XBUILDENV_ROOT}"
-
-# ---------------------------------------------------------------------------
-# Step 2: Activate the Emscripten toolchain bundled with the xbuildenv
-# ---------------------------------------------------------------------------
-EMSDK_DIR="${XBUILDENV_ROOT}/emsdk"
-if [ ! -d "${EMSDK_DIR}" ]; then
-  echo "ERROR: emsdk not found at ${EMSDK_DIR}. The pyodide xbuildenv may not have been installed correctly."
+if ! command -v emcc &>/dev/null; then
+  echo "ERROR: emcc not found in PATH. Install emsdk and run 'source emsdk_env.sh'."
+  echo "Example:"
+  echo "  git clone https://github.com/emscripten-core/emsdk"
+  echo "  cd emsdk && ./emsdk install 3.1.58 && ./emsdk activate 3.1.58 && source emsdk_env.sh"
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "${EMSDK_DIR}/emsdk_env.sh"
-
-# Derive the Emscripten ABI tag (e.g. "emscripten_3_1_58") from the activated version.
-EMSCRIPTEN_VERSION="$(emcc --version | head -1 | grep -oP '\d+\.\d+\.\d+')"
-PYODIDE_ABI_VERSION="emscripten_$(echo "${EMSCRIPTEN_VERSION}" | tr '.' '_')"
-echo "Emscripten version: ${EMSCRIPTEN_VERSION} -> ABI tag: ${PYODIDE_ABI_VERSION}"
+EMSCRIPTEN_VERSION="$(emcc --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+echo "Emscripten version: ${EMSCRIPTEN_VERSION}"
 
 # ---------------------------------------------------------------------------
-# Step 3: Determine Python include directory from the xbuildenv sysroot
+# Step 2: Build ONNX Runtime and package the wasm32-emscripten wheel
 # ---------------------------------------------------------------------------
-PYTHON_MAJOR_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-PYODIDE_SYSROOT="${XBUILDENV_ROOT}/xbuildenv/pyodide-env"
-PYTHON_INCLUDE_DIR="${PYODIDE_SYSROOT}/usr/include/python${PYTHON_MAJOR_MINOR}"
-
-if [ ! -d "${PYTHON_INCLUDE_DIR}" ]; then
-  echo "WARNING: Expected Python include dir not found at ${PYTHON_INCLUDE_DIR}."
-  echo "CMake will attempt to locate Python headers automatically."
-  PYTHON_INCLUDE_DIR=""
-fi
-
-# ---------------------------------------------------------------------------
-# Step 4: Build ONNX Runtime with Emscripten targeting Python (Pyodide)
-# ---------------------------------------------------------------------------
+# build.py handles: installing pyodide-build, setting up the xbuildenv,
+# configuring CMake with the Emscripten toolchain, compiling, and packaging.
 BUILD_DIR="${ORT_ROOT}/build_pyodide"
 mkdir -p "${BUILD_DIR}"
-
-EXTRA_CMAKE_ARGS=""
-if [ -n "${PYTHON_INCLUDE_DIR}" ]; then
-  EXTRA_CMAKE_ARGS="-DPython3_INCLUDE_DIRS=${PYTHON_INCLUDE_DIR} -DPython_INCLUDE_DIRS=${PYTHON_INCLUDE_DIR}"
-fi
 
 python3 "${ORT_ROOT}/tools/ci_build/build.py" \
   --build_pyodide_wheel \
@@ -105,31 +72,18 @@ python3 "${ORT_ROOT}/tools/ci_build/build.py" \
   --skip_submodule_sync \
   --skip_tests \
   --disable_ml_ops \
-  --disable_contrib_ops \
-  --cmake_extra_defines \
-    "FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER" \
-    ${EXTRA_CMAKE_ARGS}
+  --disable_contrib_ops
 
 # ---------------------------------------------------------------------------
-# Step 5: Package the pybind11 module as a wasm32-emscripten wheel
+# Step 3: Copy the wheel to the requested output directory
 # ---------------------------------------------------------------------------
-# Copy the compiled .so into the expected location for setup.py
-PYBIND_SO_SRC="${BUILD_DIR}/${BUILD_CONFIG}/onnxruntime_pybind11_state.so"
-PYBIND_SO_DST="${ORT_ROOT}/onnxruntime/capi/onnxruntime_pybind11_state.so"
-
-if [ ! -f "${PYBIND_SO_SRC}" ]; then
-  echo "ERROR: Compiled pybind11 module not found at ${PYBIND_SO_SRC}"
+WHEEL_SRC_DIR="${BUILD_DIR}/${BUILD_CONFIG}/dist"
+if ls "${WHEEL_SRC_DIR}"/*.whl 1>/dev/null 2>&1; then
+  cp "${WHEEL_SRC_DIR}"/*.whl "${OUTPUT_DIR}/"
+else
+  echo "ERROR: No .whl found in ${WHEEL_SRC_DIR}"
   exit 1
 fi
-
-cp "${PYBIND_SO_SRC}" "${PYBIND_SO_DST}"
-
-# Build the wheel, passing the Pyodide ABI tag via the environment
-cd "${ORT_ROOT}"
-export PYODIDE_ABI_VERSION="${PYODIDE_ABI_VERSION}"
-python3 setup.py bdist_wheel \
-  --use_pyodide \
-  --dist-dir "${OUTPUT_DIR}"
 
 echo "Pyodide wheel built successfully in ${OUTPUT_DIR}"
 ls -lh "${OUTPUT_DIR}"/*.whl
