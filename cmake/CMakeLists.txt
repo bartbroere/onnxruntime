@@ -1810,7 +1810,11 @@ endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   message(STATUS "WebAssembly Build is enabled")
-  list(APPEND ONNXRUNTIME_CMAKE_FILES onnxruntime_webassembly)
+  # onnxruntime_webassembly builds the ort-web JS/WASM bundle (ort-wasm.mjs).
+  # Skip it for Pyodide builds which produce a Python SIDE_MODULE instead.
+  if (NOT onnxruntime_BUILD_FOR_PYODIDE)
+    list(APPEND ONNXRUNTIME_CMAKE_FILES onnxruntime_webassembly)
+  endif()
 
   if (onnxruntime_ENABLE_WEBASSEMBLY_OUTPUT_OPTIMIZED_MODEL)
     add_compile_definitions(ORT_ENABLE_WEBASSEMBLY_OUTPUT_OPTIMIZED_MODEL)

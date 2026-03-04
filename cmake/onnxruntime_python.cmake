@@ -138,6 +138,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   # that is not available in Pyodide. Without this, Pyodide's WASM loader fails to parse
   # the EM_ASM sections embedded in SIDE_MODULE=2 binaries.
   # EXPORTED_FUNCTIONS prevents LTO dead-code elimination from removing PyInit_*.
+  # fwasm-exceptions is required by Pyodide 0.28+ (emscripten 4.0.9+) which switched from
+  # Emscripten's JavaScript-based exception handling to native WebAssembly exceptions.
+  # -fwasm-exceptions is set globally in adjust_global_compile_flags.cmake when
+  # onnxruntime_BUILD_FOR_PYODIDE=ON, matching Pyodide's CFLAGS_BASE / LDFLAGS_BASE.
   target_link_options(onnxruntime_pybind11_state PRIVATE
     "-sSIDE_MODULE=2"
     "-sWASM_BIGINT"

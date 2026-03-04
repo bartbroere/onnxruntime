@@ -6,14 +6,14 @@
 #
 # The resulting wheel can be installed inside a Pyodide environment with micropip:
 #   import micropip
-#   await micropip.install("onnxruntime-<version>-cp312-cp312-emscripten_3_1_58_wasm32.whl")
+#   await micropip.install("onnxruntime-<version>-cp313-cp313-pyodide_2025_0_wasm32.whl")
 #
 # Prerequisites:
-#   - Python 3.12 (must match the Python version embedded in the target Pyodide release)
-#   - pyodide-build is installed (pip install pyodide-build)
+#   - Python 3.13 (must match the Python version embedded in the target Pyodide release)
+#   - pyodide-build is installed (pip install pyodide-build==0.28.0)
 #   - emsdk is installed and activated (emcc must be in PATH):
 #       git clone https://github.com/emscripten-core/emsdk && cd emsdk
-#       ./emsdk install 3.1.58 && ./emsdk activate 3.1.58 && source emsdk_env.sh
+#       ./emsdk install 4.0.9 && ./emsdk activate 4.0.9 && source emsdk_env.sh
 #   - cmake and ninja are on PATH
 #
 # Usage:
@@ -21,7 +21,7 @@
 
 set -e -x
 
-PYODIDE_VERSION="0.27.3"
+PYODIDE_VERSION="0.28.0"
 BUILD_CONFIG="Release"
 OUTPUT_DIR="/build/dist"
 
@@ -46,7 +46,7 @@ if ! command -v emcc &>/dev/null; then
   echo "ERROR: emcc not found in PATH. Install emsdk and run 'source emsdk_env.sh'."
   echo "Example:"
   echo "  git clone https://github.com/emscripten-core/emsdk"
-  echo "  cd emsdk && ./emsdk install 3.1.58 && ./emsdk activate 3.1.58 && source emsdk_env.sh"
+  echo "  cd emsdk && ./emsdk install 4.0.9 && ./emsdk activate 4.0.9 && source emsdk_env.sh"
   exit 1
 fi
 

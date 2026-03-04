@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       pyodide_version:
-        description: "Target Pyodide version (e.g. 0.27.3)"
+        description: "Target Pyodide version (e.g. 0.28.0)"
         required: false
-        default: "0.27.3"
+        default: "0.28.0"
       build_config:
         description: "Build configuration"
         required: false
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.3' }}
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.28.0' }}
       BUILD_CONFIG: ${{ github.event.inputs.build_config || 'Release' }}
 
     steps:
@@ -50,7 +50,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           # Must match the Python version embedded in the target Pyodide release.
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install build dependencies
         run: |
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.27.3' }}
+      PYODIDE_VERSION: ${{ github.event.inputs.pyodide_version || '0.28.0' }}
 
     steps:
       - name: Checkout repository
@@ -104,7 +104,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -146,7 +146,7 @@ jobs:
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
-          name: onnxruntime-pyodide-${{ github.event.inputs.pyodide_version || '0.27.3' }}
+          name: onnxruntime-pyodide-${{ github.event.inputs.pyodide_version || '0.28.0' }}
           path: dist/
 
       - name: Publish to PyPI

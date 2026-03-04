@@ -93,21 +93,12 @@ elif parse_arg_remove_boolean(sys.argv, "--use_webgpu"):
     package_name = "onnxruntime-webgpu"
 
 is_pyodide = parse_arg_remove_boolean(sys.argv, "--use_pyodide")
-# The Pyodide ABI tag encodes the Emscripten version, e.g. "emscripten_3_1_58".
-# It is read from the PYODIDE_ABI_VERSION environment variable (set by the build script),
-# falling back to the value embedded in the installed pyodide-build package.
+# The Pyodide ABI tag is read from the PYODIDE_ABI_VERSION environment variable
+# (set by the build script from pyodide-lock.json).  Modern Pyodide (0.28+) uses
+# a stable platform tag like "pyodide_2025_0_wasm32" rather than embedding the
+# emcc version.
 if is_pyodide:
-    _pyodide_abi_version = environ.get("PYODIDE_ABI_VERSION")
-    if _pyodide_abi_version is None:
-        try:
-            import pyodide_build  # noqa: PLC0415
-
-            _pyodide_abi_version = pyodide_build.__version__.replace(".", "_")
-            # pyodide-build's version is the Pyodide version, not the Emscripten version.
-            # The correct ABI tag comes from the xbuildenv metadata.
-            _pyodide_abi_version = environ.get("PYODIDE_ABI_VERSION", "emscripten_3_1_58")
-        except ImportError:
-            _pyodide_abi_version = "emscripten_3_1_58"
+    _pyodide_abi_version = environ.get("PYODIDE_ABI_VERSION", "pyodide_2025_0")
     PYODIDE_ABI_VERSION = _pyodide_abi_version
 
 
@@ -157,8 +148,8 @@ try:
         if is_pyodide:
 
             def get_tag(self):
-                # Produce a wheel tagged for wasm32-emscripten, e.g.:
-                #   cp312-cp312-emscripten_3_1_58_wasm32
+                # Produce a wheel tagged for Pyodide, e.g.:
+                #   cp313-cp313-pyodide_2025_0_wasm32  (Pyodide 0.28+)
                 python_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
                 abi_tag = python_tag
                 platform_tag = f"{PYODIDE_ABI_VERSION}_wasm32"

@@ -2022,18 +2022,34 @@ def build_python_wheel(
             cwd = os.path.join(cwd, config)
 
         if use_pyodide:
-            import re as _re
+            import json as _json
             import subprocess as _subprocess
 
-            # Determine the Pyodide ABI tag from the active emcc version.
+            # Determine the Pyodide ABI tag from pyodide-lock.json inside the xbuildenv.
+            # Modern Pyodide (0.28+) uses a stable ABI tag like "pyodide_2025_0_wasm32"
+            # rather than encoding the emcc version.  Fall back to the emcc version for
+            # older builds.
             # CMake already populated cwd/onnxruntime/capi/ with the built .so.
+            pyodide_abi_version = None
             try:
-                emcc_out = _subprocess.check_output(["emcc", "--version"], stderr=_subprocess.STDOUT).decode()
-                m = _re.search(r"(\d+\.\d+\.\d+)", emcc_out)
-                emcc_ver = m.group(1) if m else "3.1.58"
+                import pyodide_build as _pb
+                from pyodide_build.build_env import xbuildenv_dirname as _xbuildenv_dirname
+                from pyodide_build.xbuildenv import CrossBuildEnvManager as _Mgr
+                _mgr = _Mgr(_xbuildenv_dirname())
+                _lock = _mgr.pyodide_root / "dist" / "pyodide-lock.json"
+                _info = _json.loads(_lock.read_text())["info"]
+                pyodide_abi_version = "pyodide_" + _info["abi_version"]
             except Exception:
-                emcc_ver = "3.1.58"
-            pyodide_abi_version = "emscripten_" + emcc_ver.replace(".", "_")
+                pass
+            if pyodide_abi_version is None:
+                import re as _re
+                try:
+                    emcc_out = _subprocess.check_output(["emcc", "--version"], stderr=_subprocess.STDOUT).decode()
+                    m = _re.search(r"(\d+\.\d+\.\d+)", emcc_out)
+                    emcc_ver = m.group(1) if m else "4.0.9"
+                except Exception:
+                    emcc_ver = "4.0.9"
+                pyodide_abi_version = "emscripten_" + emcc_ver.replace(".", "_")
             log.info("PYODIDE_ABI_VERSION: %s", pyodide_abi_version)
 
             wheel_args = [sys.executable, os.path.join(source_dir, "setup.py"), "bdist_wheel", "--use_pyodide"]
@@ -2639,6 +2655,19 @@ def main():
             # Use the `pyodide` CLI entry point installed alongside pyodide-build.
             pyodide_cli = str(Path(sys.executable).parent / "pyodide")
             run_subprocess([pyodide_cli, "xbuildenv", "install", args.pyodide_version])
+
+            # pyodide-build installs the `cmake` Python package (cmake 4.x).
+            # Override cmake_path to use it if the user didn't specify a custom cmake
+            # and the system cmake may be too old (project requires CMake 3.28+).
+            if args.cmake_path == "cmake":
+                try:
+                    import cmake as _cmake_pkg  # noqa: PLC0415
+                    _cmake_bin = str(Path(_cmake_pkg.CMAKE_BIN_DIR) / "cmake")
+                    if Path(_cmake_bin).exists():
+                        cmake_path = _cmake_bin
+                        log.info("Using cmake from pyodide-build Python package: %s", cmake_path)
+                except ImportError:
+                    pass
 
         if not args.skip_pip_install and args.enable_pybind and is_windows():
             run_subprocess(
