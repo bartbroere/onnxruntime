@@ -45,20 +45,22 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     string(APPEND CMAKE_CXX_FLAGS " -msimd128")
   endif()
 
-  # Enable WebAssembly exception catching.
+  # Enable WebAssembly exception handling.
   if (onnxruntime_ENABLE_WEBASSEMBLY_JSPI)
     string(APPEND CMAKE_C_FLAGS " -fwasm-exceptions -s WASM_LEGACY_EXCEPTIONS=0")
     string(APPEND CMAKE_CXX_FLAGS " -fwasm-exceptions -s WASM_LEGACY_EXCEPTIONS=0")
-  elseif (onnxruntime_ENABLE_WEBASSEMBLY_EXCEPTION_CATCHING)
-    string(APPEND CMAKE_C_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
-    string(APPEND CMAKE_CXX_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
   elseif (onnxruntime_BUILD_FOR_PYODIDE)
     # Pyodide 0.28+ uses native WebAssembly exception handling, matching Pyodide's
     # own CFLAGS_BASE / LDFLAGS_BASE which include -fwasm-exceptions globally.
+    # This must come before EXCEPTION_CATCHING since build.py sets that flag based on
+    # --disable_wasm_exception_catching (default ON), which would wrongly override Pyodide.
     string(APPEND CMAKE_C_FLAGS " -fwasm-exceptions")
     string(APPEND CMAKE_CXX_FLAGS " -fwasm-exceptions")
     string(APPEND CMAKE_MODULE_LINKER_FLAGS " -fwasm-exceptions")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS " -fwasm-exceptions")
+  elseif (onnxruntime_ENABLE_WEBASSEMBLY_EXCEPTION_CATCHING)
+    string(APPEND CMAKE_C_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
+    string(APPEND CMAKE_CXX_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
   endif()
 
   # Build WebAssembly with multi-threads support.

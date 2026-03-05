@@ -496,7 +496,8 @@ def generate_build_tree(
         "-Donnxruntime_USE_CUDA_NHWC_OPS=" + ("ON" if args.use_cuda and not args.disable_cuda_nhwc_ops else "OFF"),
         "-Donnxruntime_BUILD_WEBASSEMBLY_STATIC_LIB=" + ("ON" if args.build_wasm_static_lib else "OFF"),
         "-Donnxruntime_ENABLE_WEBASSEMBLY_EXCEPTION_CATCHING="
-        + ("OFF" if args.disable_wasm_exception_catching else "ON"),
+        # Pyodide uses native WASM exceptions (-fwasm-exceptions), not JS-based catching.
+        + ("OFF" if args.disable_wasm_exception_catching or args.build_pyodide_wheel else "ON"),
         "-Donnxruntime_ENABLE_WEBASSEMBLY_API_EXCEPTION_CATCHING="
         + ("ON" if args.enable_wasm_api_exception_catching else "OFF"),
         "-Donnxruntime_ENABLE_WEBASSEMBLY_EXCEPTION_THROWING="
