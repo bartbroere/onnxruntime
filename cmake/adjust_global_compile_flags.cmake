@@ -58,6 +58,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     string(APPEND CMAKE_CXX_FLAGS " -fwasm-exceptions")
     string(APPEND CMAKE_MODULE_LINKER_FLAGS " -fwasm-exceptions")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS " -fwasm-exceptions")
+    # Pyodide SIDE_MODULEs cannot contain __em_js__ globals (the browser's dynamic linker
+    # cannot register them, and CSP may block new Function() used to eval them).
+    # absl::symbolize uses EM_JS(HaveOffsetConverter) for WASM stack-trace support.
+    # Define STANDALONE_WASM to make abseil fall through to symbolize_unimplemented.inc
+    # (a safe no-op stub), instead of symbolize_emscripten.inc (which contains EM_JS).
+    add_compile_definitions(STANDALONE_WASM)
   elseif (onnxruntime_ENABLE_WEBASSEMBLY_EXCEPTION_CATCHING)
     string(APPEND CMAKE_C_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
     string(APPEND CMAKE_CXX_FLAGS " -s DISABLE_EXCEPTION_CATCHING=0")
